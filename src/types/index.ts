@@ -1,13 +1,57 @@
+export type ItemType = 'lost' | 'found';
+export type ItemStatus = 'lost' | 'found' | 'reunited';
+export type ItemCategory =
+  | 'electronics'
+  | 'id_cards'
+  | 'keys'
+  | 'bags'
+  | 'books'
+  | 'clothing'
+  | 'accessories'
+  | 'other';
+
+export interface TimelineEvent {
+  id: string;
+  date: string; // e.g., '04 Oct' or ISO
+  time?: string;
+  title: string;
+  location?: string;
+  actor?: string;
+  note?: string;
+}
+
+export interface PrivateClue {
+  type: 'serial' | 'scratch' | 'sticker' | 'engraving' | 'wallpaper' | 'contents' | 'other';
+  question: string;
+  answer: string;
+  hint?: string;
+}
+
+export interface SafeHandoff {
+  code: string; // e.g. "739 214"
+  pickupLocation: string; // e.g. "Dr. APJ Abdul Kalam Central Library Help Desk"
+  status: 'pending' | 'ready' | 'completed';
+  expiresAt?: string;
+  notes?: string;
+}
+
+export interface TrustBadge {
+  status: 'in_safe_custody' | 'staff_verified' | 'finder_held';
+  verifiedBy?: string;
+  verifiedAt?: string;
+}
+
 export interface Item {
   id: string;
-  type: 'lost' | 'found';
+  passportId: string; // e.g. "CR-2026-01482"
+  type: ItemType;
   title: string;
   description: string;
-  category: 'electronics' | 'id_cards' | 'keys' | 'bags' | 'books' | 'clothing' | 'accessories' | 'other';
+  category: ItemCategory;
   locationId: string;
   locationName: string;
   dateReported: string; // ISO string
-  status: 'lost' | 'found' | 'reunited';
+  status: ItemStatus;
   imageUrl: string;
   tags: string[];
   reporter: {
@@ -19,8 +63,12 @@ export interface Item {
   };
   secretVerification: {
     hintQuestion: string;
-    secretAnswer: string; // Used for claim verification
+    secretAnswer: string;
   };
+  privateClues?: PrivateClue;
+  safeHandoff?: SafeHandoff;
+  trustBadge?: TrustBadge;
+  timeline?: TimelineEvent[];
   reward?: string;
   matchedItemId?: string;
 }
@@ -32,8 +80,10 @@ export interface CampusLocation {
   description: string;
   category: 'Academic' | 'Student Life' | 'Athletics' | 'Services' | 'Residence';
   coordinates: {
-    x: number; // percentage on SVG grid (0 - 100)
-    y: number; // percentage on SVG grid (0 - 100)
+    lat: number;
+    lng: number;
+    x?: number; // fallback percentage
+    y?: number;
   };
   safeZone: boolean;
   lostCount?: number;
@@ -53,7 +103,7 @@ export interface KarmaUser {
     name: string;
     icon: string;
     description: string;
-    color: string;
+    color?: string;
   }[];
   recentActivity: {
     id: string;

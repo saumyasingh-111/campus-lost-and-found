@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { MapPin, ShieldCheck, Compass, Filter, ChevronRight, Sparkles, Building, Layers } from 'lucide-react';
-import { CAMPUS_LOCATIONS } from '../data/campusLocations';
-import { Item, CampusLocation } from '../types';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import L from 'leaflet';
+import { ShieldCheck, RotateCcw, Building2, X, PlusCircle } from 'lucide-react';
+import { CAMPUS_LOCATIONS, CAMPUS_CENTER } from '../data/campusLocations';
+import { Item } from '../types';
 import { ItemCard } from './ItemCard';
 
 interface CampusMapProps {
@@ -10,6 +11,7 @@ interface CampusMapProps {
   onSelectLocation: (locId: string | null) => void;
   onClaimItem: (item: Item) => void;
   onOpenReportModal: () => void;
+  onViewItemPassport?: (item: Item) => void;
 }
 
 export const CampusMap: React.FC<CampusMapProps> = ({
@@ -18,341 +20,355 @@ export const CampusMap: React.FC<CampusMapProps> = ({
   onSelectLocation,
   onClaimItem,
   onOpenReportModal,
+  onViewItemPassport,
 }) => {
-  const [filterMode, setFilterMode] = useState<'all' | 'lost' | 'found'>('all');
-  const [hoveredLocation, setHoveredLocation] = useState<CampusLocation | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
+  const mapInstanceRef = useRef<L.Map | null>(null);
+  const markersLayerRef = useRef<L.LayerGroup | null>(null);
 
-  // Group items by location
-  const locationStats = CAMPUS_LOCATIONS.map((loc) => {
-    const locItems = items.filter((i) => i.locationId === loc.id);
-    const lostCount = locItems.filter((i) => i.status === 'lost').length;
-    const foundCount = locItems.filter((i) => i.status === 'found').length;
-    const total = locItems.length;
+  const [filterMode, setFilterMode] = useState<'all' | 'lost' | 'found' | 'reunited'>('all');
 
-    return {
-      ...loc,
-      items: locItems,
-      lostCount,
-      foundCount,
-      totalCount: total,
-    };
-  });
+  // Compute location stats
+  const locationStats = useMemo(() => {
+    return CAMPUS_LOCATIONS.map((loc) => {
+      const locItems = items.filter((i) => i.locationId === loc.id);
+      const lostCount = locItems.filter((i) => i.status === 'lost').length;
+      const foundCount = locItems.filter((i) => i.status === 'found').length;
+      const reunitedCount = locItems.filter((i) => i.status === 'reunited').length;
+      return {
+        ...loc,
+        items: locItems,
+        lostCount,
+        foundCount,
+        reunitedCount,
+        totalCount: locItems.length,
+      };
+    });
+  }, [items]);
 
   const activeLocation = locationStats.find((l) => l.id === selectedLocationId) || null;
 
-  // Filter items in active location
   const activeLocationItems = activeLocation
     ? activeLocation.items.filter((item) => {
         if (filterMode === 'lost') return item.status === 'lost';
         if (filterMode === 'found') return item.status === 'found';
+        if (filterMode === 'reunited') return item.status === 'reunited';
         return true;
       })
     : [];
 
-  return (
-    <div className="space-y-6">
-      {/* Map Control Bar */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center">
-            <Compass className="w-5 h-5" />
+  // Initialize Leaflet Map
+  useEffect(() => {
+    if (!mapContainerRef.current) return;
+    if (mapInstanceRef.current) return; // already initialized
+
+    const map = L.map(mapContainerRef.current, {
+      center: [CAMPUS_CENTER.lat, CAMPUS_CENTER.lng],
+      zoom: CAMPUS_CENTER.zoom,
+      zoomControl: false,
+      attributionControl: true,
+    });
+
+    // Light OpenStreetMap Tile Layer
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors',
+    }).addTo(map);
+
+    // Zoom control at bottom right
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    // Marker Layer Group
+    const markersGroup = L.layerGroup().addTo(map);
+    markersLayerRef.current = markersGroup;
+    mapInstanceRef.current = map;
+
+    return () => {
+      map.remove();
+      mapInstanceRef.current = null;
+      markersLayerRef.current = null;
+    };
+  }, []);
+
+  // Update Markers when items, filterMode, or selectedLocationId changes
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    const markersGroup = markersLayerRef.current;
+    if (!map || !markersGroup) return;
+
+    markersGroup.clearLayers();
+
+    locationStats.forEach((loc) => {
+      // Check if location should be displayed according to filterMode
+      if (filterMode === 'lost' && loc.lostCount === 0) return;
+      if (filterMode === 'found' && loc.foundCount === 0) return;
+      if (filterMode === 'reunited' && loc.reunitedCount === 0) return;
+
+      const isSelected = selectedLocationId === loc.id;
+
+      // Label for clean Apple/Google Maps style marker: "📍 Library — 2 items"
+      let countLabel = '';
+      if (filterMode === 'lost') {
+        countLabel = `${loc.lostCount} lost`;
+      } else if (filterMode === 'found') {
+        countLabel = `${loc.foundCount} found`;
+      } else if (filterMode === 'reunited') {
+        countLabel = `${loc.reunitedCount} reunited`;
+      } else {
+        countLabel = loc.totalCount === 1 ? '1 item' : `${loc.totalCount} items`;
+      }
+
+      const iconHtml = `
+        <div class="campus-marker-pin ${isSelected ? 'active' : ''}">
+          <span style="font-size: 12px; line-height: 1;">📍</span>
+          <span>${loc.code}</span>
+          ${
+            loc.totalCount > 0
+              ? `<span class="${
+                  loc.foundCount > 0 ? 'marker-badge-found' : 'marker-badge-lost'
+                }">${countLabel}</span>`
+              : ''
+          }
+        </div>
+      `;
+
+      const customIcon = L.divIcon({
+        className: 'custom-leaflet-div-icon',
+        html: iconHtml,
+        iconSize: [110, 28],
+        iconAnchor: [55, 14],
+        popupAnchor: [0, -16],
+      });
+
+      const marker = L.marker([loc.coordinates.lat, loc.coordinates.lng], {
+        icon: customIcon,
+      });
+
+      // Clean Light Popup
+      const popupHtml = document.createElement('div');
+      popupHtml.className = 'p-3 space-y-2';
+      popupHtml.innerHTML = `
+        <div style="padding: 2px 0;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+            <h4 style="font-size: 13px; font-weight: 700; color: #0f172a; margin: 0;">${loc.name}</h4>
           </div>
-          <div>
-            <h2 className="text-base font-bold text-slate-900">Interactive Campus Map Grid</h2>
-            <p className="text-xs text-slate-500">
-              Click pins or buildings to inspect local item drop-offs and reported losses
-            </p>
+          <p style="font-size: 11px; color: #64748b; margin: 4px 0 8px 0; line-height: 1.3;">
+            ${loc.description}
+          </p>
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; color: #334155; padding-bottom: 6px; border-bottom: 1px solid #f1f5f9;">
+            <span>${loc.totalCount} reported item${loc.totalCount !== 1 ? 's' : ''}</span>
+            <span>•</span>
+            <span style="color: #b45309;">${loc.lostCount} Lost</span>
+            <span>•</span>
+            <span style="color: #047857;">${loc.foundCount} Found</span>
           </div>
         </div>
+      `;
 
-        {/* Filter by pin type */}
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-slate-500 hidden md:inline">Display:</span>
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl">
+      const viewItemsBtn = document.createElement('button');
+      viewItemsBtn.innerText = `View items (${loc.totalCount})`;
+      viewItemsBtn.style.cssText =
+        'width: 100%; padding: 6px 10px; background-color: #4338ca; color: #ffffff; border: none; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; transition: background 0.15s;';
+      viewItemsBtn.onmouseover = () => {
+        viewItemsBtn.style.backgroundColor = '#3730a3';
+      };
+      viewItemsBtn.onmouseout = () => {
+        viewItemsBtn.style.backgroundColor = '#4338ca';
+      };
+      viewItemsBtn.onclick = () => {
+        onSelectLocation(loc.id);
+        map.closePopup();
+      };
+      popupHtml.appendChild(viewItemsBtn);
+
+      marker.bindPopup(popupHtml, {
+        maxWidth: 240,
+        className: 'clean-campus-popup',
+      });
+
+      marker.on('click', () => {
+        onSelectLocation(loc.id);
+      });
+
+      markersGroup.addLayer(marker);
+    });
+  }, [items, filterMode, selectedLocationId, onSelectLocation, locationStats]);
+
+  // Pan to selected location if set
+  useEffect(() => {
+    if (!selectedLocationId || !mapInstanceRef.current) return;
+    const targetLoc = CAMPUS_LOCATIONS.find((l) => l.id === selectedLocationId);
+    if (targetLoc) {
+      mapInstanceRef.current.flyTo(
+        [targetLoc.coordinates.lat, targetLoc.coordinates.lng],
+        17,
+        { duration: 0.8 }
+      );
+    }
+  }, [selectedLocationId]);
+
+  // Recenter map
+  const handleRecenter = () => {
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.flyTo(
+        [CAMPUS_CENTER.lat, CAMPUS_CENTER.lng],
+        CAMPUS_CENTER.zoom,
+        { duration: 0.8 }
+      );
+    }
+    onSelectLocation(null);
+  };
+
+  // Jump to building from dropdown
+  const handleBuildingSelect = (locId: string) => {
+    if (!locId) {
+      onSelectLocation(null);
+      return;
+    }
+    onSelectLocation(locId);
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Real Campus Map Header / Control Bar */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+        {/* Left: Building Search & Jump */}
+        <div className="flex items-center gap-2 flex-1 max-w-md">
+          <div className="relative w-full">
+            <Building2 className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <select
+              value={selectedLocationId || ''}
+              onChange={(e) => handleBuildingSelect(e.target.value)}
+              className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+            >
+              <option value="">Jump to Campus Building...</option>
+              {CAMPUS_LOCATIONS.map((loc) => {
+                const count = items.filter((i) => i.locationId === loc.id).length;
+                return (
+                  <option key={loc.id} value={loc.id}>
+                    {loc.code} — {loc.name} ({count} items)
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+          {selectedLocationId && (
+            <button
+              onClick={() => onSelectLocation(null)}
+              title="Clear selection"
+              className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        {/* Right: Map Filter & Action Buttons */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Status Filter */}
+          <div className="flex items-center p-0.5 bg-slate-100 rounded-lg border border-slate-200 text-xs">
             <button
               onClick={() => setFilterMode('all')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              className={`px-2.5 py-1 rounded-md font-medium transition-all ${
                 filterMode === 'all'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              All Pins
+              All
             </button>
             <button
               onClick={() => setFilterMode('lost')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+              className={`px-2.5 py-1 rounded-md font-medium transition-all ${
                 filterMode === 'lost'
-                  ? 'bg-amber-500 text-white shadow-xs'
-                  : 'text-amber-700 hover:bg-amber-100/60'
+                  ? 'bg-white text-amber-700 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <span className="w-2 h-2 rounded-full bg-amber-200"></span>
               Lost
             </button>
             <button
               onClick={() => setFilterMode('found')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+              className={`px-2.5 py-1 rounded-md font-medium transition-all ${
                 filterMode === 'found'
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-emerald-700 hover:bg-emerald-100/60'
+                  ? 'bg-white text-emerald-700 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <span className="w-2 h-2 rounded-full bg-emerald-200"></span>
               Found
             </button>
-          </div>
-          {selectedLocationId && (
             <button
-              onClick={() => onSelectLocation(null)}
-              className="text-xs text-indigo-600 font-semibold px-2.5 py-1.5 hover:bg-indigo-50 rounded-lg"
+              onClick={() => setFilterMode('reunited')}
+              className={`px-2.5 py-1 rounded-md font-medium transition-all ${
+                filterMode === 'reunited'
+                  ? 'bg-white text-blue-700 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
             >
-              Show Entire Campus
+              Reunited
             </button>
-          )}
+          </div>
+
+          {/* Recenter Button */}
+          <button
+            onClick={handleRecenter}
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 transition-colors shadow-xs"
+          >
+            <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+            <span className="hidden sm:inline">Recenter</span>
+          </button>
+
+          {/* Report Button */}
+          <button
+            onClick={onOpenReportModal}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-xs"
+          >
+            <PlusCircle className="w-3.5 h-3.5" />
+            <span>Report Item</span>
+          </button>
         </div>
       </div>
 
-      {/* SVG Map Canvas Container */}
-      <div className="relative bg-slate-900 rounded-3xl overflow-hidden shadow-xl border border-slate-800">
-        {/* Map Legend Floating Tag */}
-        <div className="absolute top-4 left-4 z-20 bg-slate-900/90 backdrop-blur-md px-3.5 py-2.5 rounded-xl border border-slate-700 text-xs text-slate-300 flex items-center gap-4 shadow-lg">
+      {/* Real Interactive Map Canvas */}
+      <div className="relative rounded-xl border border-slate-200 overflow-hidden shadow-xs bg-slate-100">
+        {/* Real Leaflet Map Container */}
+        <div
+          ref={mapContainerRef}
+          className="w-full h-[480px] sm:h-[540px] z-10"
+        />
+
+        {/* Floating Quick Legend */}
+        <div className="absolute top-3 left-3 z-20 bg-white/95 backdrop-blur-xs px-3 py-2 rounded-lg border border-slate-200 text-[11px] text-slate-600 flex items-center gap-3 shadow-xs">
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+            <span className="w-2 h-2 rounded-full bg-amber-500"></span>
             <span>Lost Item</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+            <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
             <span>Found Item</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
-            <span>Safe Exchange Zone</span>
+            <ShieldCheck className="w-3 h-3 text-indigo-600" />
+            <span>Monitored Safe Desk</span>
           </div>
-        </div>
-
-        {/* Hover / Quick Detail Tag */}
-        {hoveredLocation && (
-          <div className="absolute bottom-4 left-4 z-20 bg-slate-900/95 backdrop-blur-md px-4 py-2.5 rounded-xl border border-indigo-500 text-white shadow-2xl max-w-sm pointer-events-none transition-all">
-            <p className="font-bold text-sm text-indigo-300">{hoveredLocation.name} ({hoveredLocation.code})</p>
-            <p className="text-xs text-slate-300 mt-0.5">{hoveredLocation.description}</p>
-            <div className="flex items-center gap-3 mt-2 text-xs font-semibold">
-              <span className="text-amber-400">Lost: {hoveredLocation.lostCount || 0}</span>
-              <span className="text-emerald-400">Found: {hoveredLocation.foundCount || 0}</span>
-              {hoveredLocation.safeZone && (
-                <span className="text-blue-400 flex items-center gap-1">
-                  <ShieldCheck className="w-3 h-3" /> Safe Zone
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* The Campus Vector Map (SVG) */}
-        <div className="relative w-full aspect-16/10 min-h-[460px] overflow-hidden select-none">
-          <svg
-            viewBox="0 0 1000 650"
-            className="w-full h-full object-cover"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <defs>
-              <radialGradient id="campusGlow" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="#1e1b4b" stopOpacity="0.4" />
-                <stop offset="100%" stopColor="#0f172a" stopOpacity="0.9" />
-              </radialGradient>
-              <pattern id="gridPattern" width="40" height="40" patternUnits="userSpaceOnUse">
-                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#334155" strokeWidth="0.5" opacity="0.3" />
-              </pattern>
-            </defs>
-
-            {/* Background & Grid */}
-            <rect width="1000" height="650" fill="#090d16" />
-            <rect width="1000" height="650" fill="url(#gridPattern)" />
-            <rect width="1000" height="650" fill="url(#campusGlow)" />
-
-            {/* Campus Boundary Lines & Roads */}
-            <path
-              d="M 50 120 Q 300 80 500 120 T 950 140"
-              stroke="#1e293b"
-              strokeWidth="28"
-              fill="none"
-              strokeLinecap="round"
-            />
-            <path
-              d="M 120 50 Q 150 350 250 580"
-              stroke="#1e293b"
-              strokeWidth="24"
-              fill="none"
-              strokeLinecap="round"
-            />
-            <path
-              d="M 500 120 L 500 600"
-              stroke="#1e293b"
-              strokeWidth="24"
-              fill="none"
-              strokeLinecap="round"
-            />
-            <path
-              d="M 250 350 L 880 380"
-              stroke="#1e293b"
-              strokeWidth="20"
-              fill="none"
-              strokeLinecap="round"
-            />
-            <path
-              d="M 850 100 L 780 600"
-              stroke="#1e293b"
-              strokeWidth="22"
-              fill="none"
-              strokeLinecap="round"
-            />
-
-            {/* Central Quad Lawn Lawn / Greenery */}
-            <ellipse cx="480" cy="420" rx="140" ry="90" fill="#064e3b" opacity="0.25" />
-            <circle cx="480" cy="420" r="70" fill="#065f46" opacity="0.3" />
-            <circle cx="480" cy="420" r="16" fill="#0284c7" opacity="0.6" /> {/* Fountain */}
-
-            {/* Athletic Complex Field */}
-            <rect x="120" y="160" width="160" height="100" rx="12" fill="#047857" opacity="0.2" stroke="#059669" strokeWidth="1" strokeDasharray="4 4" />
-
-            {/* Stylized Building Footprints */}
-            {locationStats.map((loc) => {
-              const svgX = (loc.coordinates.x / 100) * 1000;
-              const svgY = (loc.coordinates.y / 100) * 650;
-              const isSelected = selectedLocationId === loc.id;
-
-              return (
-                <g
-                  key={loc.id}
-                  className="cursor-pointer transition-transform duration-200"
-                  onClick={() => onSelectLocation(loc.id)}
-                  onMouseEnter={() => setHoveredLocation(loc)}
-                  onMouseLeave={() => setHoveredLocation(null)}
-                >
-                  {/* Building Block */}
-                  <rect
-                    x={svgX - 44}
-                    y={svgY - 32}
-                    width="88"
-                    height="64"
-                    rx="10"
-                    fill={isSelected ? '#312e81' : '#1e293b'}
-                    stroke={isSelected ? '#818cf8' : '#334155'}
-                    strokeWidth={isSelected ? '2.5' : '1.5'}
-                    className="hover:stroke-indigo-400 transition-colors"
-                  />
-                  {/* Architectural accents */}
-                  <rect
-                    x={svgX - 36}
-                    y={svgY - 24}
-                    width="72"
-                    height="48"
-                    rx="6"
-                    fill={isSelected ? '#3730a3' : '#0f172a'}
-                    opacity="0.8"
-                  />
-                  {/* Building Code Label inside */}
-                  <text
-                    x={svgX}
-                    y={svgY + 4}
-                    textAnchor="middle"
-                    fill={isSelected ? '#e0e7ff' : '#94a3b8'}
-                    fontSize="13"
-                    fontWeight="bold"
-                    letterSpacing="0.05em"
-                  >
-                    {loc.code}
-                  </text>
-                  <text
-                    x={svgX}
-                    y={svgY + 18}
-                    textAnchor="middle"
-                    fill={isSelected ? '#c7d2fe' : '#64748b'}
-                    fontSize="9"
-                    fontWeight="500"
-                  >
-                    {loc.items.length} items
-                  </text>
-                </g>
-              );
-            })}
-          </svg>
-
-          {/* Dynamic Interactive HTML Pins Layer on top of SVG */}
-          {locationStats.map((loc) => {
-            const hasLost = loc.lostCount > 0;
-            const hasFound = loc.foundCount > 0;
-            const isSelected = selectedLocationId === loc.id;
-
-            // Check if matches filterMode
-            if (filterMode === 'lost' && !hasLost) return null;
-            if (filterMode === 'found' && !hasFound) return null;
-
-            return (
-              <div
-                key={loc.id}
-                style={{
-                  left: `${loc.coordinates.x}%`,
-                  top: `${loc.coordinates.y}%`,
-                }}
-                className="absolute -translate-x-1/2 -translate-y-1/2 z-10 cursor-pointer pointer-events-auto"
-                onClick={() => onSelectLocation(loc.id)}
-                onMouseEnter={() => setHoveredLocation(loc)}
-                onMouseLeave={() => setHoveredLocation(null)}
-              >
-                <div className="relative group">
-                  {/* Pulsing halo if items present */}
-                  {loc.totalCount > 0 && (
-                    <span
-                      className={`absolute -inset-2 rounded-full opacity-75 animate-ping ${
-                        hasFound ? 'bg-emerald-400' : 'bg-amber-400'
-                      }`}
-                    ></span>
-                  )}
-
-                  {/* Main Pin Element */}
-                  <div
-                    className={`relative flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-extrabold shadow-lg ring-2 transition-all ${
-                      isSelected
-                        ? 'bg-indigo-600 text-white ring-white scale-110'
-                        : hasFound && hasLost
-                        ? 'bg-gradient-to-r from-amber-500 to-emerald-600 text-white ring-slate-900'
-                        : hasFound
-                        ? 'bg-emerald-600 text-white ring-slate-900'
-                        : hasLost
-                        ? 'bg-amber-500 text-white ring-slate-900'
-                        : 'bg-slate-800 text-slate-300 ring-slate-700'
-                    }`}
-                  >
-                    <MapPin className="w-3.5 h-3.5 shrink-0" />
-                    <span>{loc.code}</span>
-                    {loc.totalCount > 0 && (
-                      <span className="ml-0.5 px-1 py-0.2 rounded-full bg-black/30 text-[10px]">
-                        {loc.totalCount}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
         </div>
       </div>
 
-      {/* Selected Location Details & Item List */}
+      {/* Selected Location Details Card & Filtered Items */}
       {activeLocation && (
-        <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-3">
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
             <div>
               <div className="flex items-center gap-2">
-                <span className="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                <span className="px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-slate-100 text-slate-800 border border-slate-200">
                   {activeLocation.code}
                 </span>
-                <h3 className="text-xl font-extrabold text-slate-900">{activeLocation.name}</h3>
+                <h3 className="text-base font-bold text-slate-900">{activeLocation.name}</h3>
                 {activeLocation.safeZone && (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    Designated Safe Zone
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <ShieldCheck className="w-3 h-3" />
+                    Safe Exchange Zone
                   </span>
                 )}
               </div>
@@ -360,37 +376,32 @@ export const CampusMap: React.FC<CampusMapProps> = ({
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="text-right">
-                <p className="text-xs font-semibold text-slate-400 uppercase">Building Total</p>
-                <p className="text-lg font-bold text-slate-900">
-                  {activeLocation.totalCount} items
-                  <span className="text-xs font-medium text-slate-500 ml-1.5">
-                    ({activeLocation.lostCount} lost, {activeLocation.foundCount} found)
-                  </span>
-                </p>
-              </div>
+              <span className="text-xs text-slate-600">
+                <strong>{activeLocation.totalCount}</strong> items ({activeLocation.lostCount} lost, {activeLocation.foundCount} found)
+              </span>
               <button
-                onClick={onOpenReportModal}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition-all shadow-xs"
+                onClick={() => onSelectLocation(null)}
+                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
               >
-                + Report Item Here
+                Close location view
               </button>
             </div>
           </div>
 
           {/* Items in this location */}
           {activeLocationItems.length === 0 ? (
-            <div className="py-8 text-center text-slate-400 text-xs">
+            <div className="py-6 text-center text-slate-400 text-xs">
               No {filterMode !== 'all' ? filterMode : ''} items currently reported at this location.
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-1">
               {activeLocationItems.map((item) => (
                 <ItemCard
                   key={item.id}
                   item={item}
                   onClaim={onClaimItem}
                   onSelectOnMap={() => {}}
+                  onViewPassport={onViewItemPassport}
                 />
               ))}
             </div>

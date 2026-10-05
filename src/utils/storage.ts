@@ -1,7 +1,7 @@
 import { Item } from '../types';
 import { INITIAL_ITEMS } from '../data/initialItems';
 
-const STORAGE_KEY = 'campus_khoj_items_v2';
+const STORAGE_KEY = 'campus_reunite_items_v3';
 
 export function loadStoredItems(): Item[] {
   try {
@@ -12,7 +12,20 @@ export function loadStoredItems(): Item[] {
     }
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      return parsed;
+      // Ensure any legacy parsed items have passportId
+      return parsed.map((item: any, idx: number) => ({
+        ...item,
+        passportId: item.passportId || `CR-2026-${String(idx + 1400).padStart(5, '0')}`,
+        timeline: item.timeline || [
+          {
+            id: `t-migrated-${idx}`,
+            date: '04 Oct',
+            time: '12:00',
+            title: `Item registered as ${item.status}`,
+            location: item.locationName,
+          },
+        ],
+      }));
     }
     return INITIAL_ITEMS;
   } catch (e) {

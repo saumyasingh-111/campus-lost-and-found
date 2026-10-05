@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Item, AutoMatchPair } from './types';
+import { Item } from './types';
 import { loadStoredItems, saveStoredItems } from './utils/storage';
 import { computeAutoMatches } from './utils/matchingEngine';
 import { INITIAL_ITEMS } from './data/initialItems';
+import { LandingPage } from './components/LandingPage';
 import { Header } from './components/Header';
 import { AnalyticsCards } from './components/AnalyticsCards';
 import { SearchAndFilters } from './components/SearchAndFilters';
@@ -10,12 +11,13 @@ import { ItemGrid } from './components/ItemGrid';
 import { PostItemModal } from './components/PostItemModal';
 import { SmartMatchDrawer } from './components/SmartMatchDrawer';
 import { ClaimModal } from './components/ClaimModal';
+import { ItemPassportModal } from './components/ItemPassportModal';
 import { CampusMap } from './components/CampusMap';
 import { LeaderboardView } from './components/LeaderboardView';
 import { ToastContainer, ToastMessage } from './components/Toast';
-import { Sparkles, Compass, Trophy } from 'lucide-react';
 
 export function App() {
+  const [viewMode, setViewMode] = useState<'landing' | 'app'>('landing');
   const [items, setItems] = useState<Item[]>(() => loadStoredItems());
   const [activeTab, setActiveTab] = useState<'feed' | 'map' | 'matches' | 'leaderboard'>('feed');
 
@@ -31,6 +33,7 @@ export function App() {
   const [isSmartMatchOpen, setIsSmartMatchOpen] = useState(false);
   const [selectedLostItemForMatch, setSelectedLostItemForMatch] = useState<Item | null>(null);
   const [claimingItem, setClaimingItem] = useState<Item | null>(null);
+  const [viewingPassportItem, setViewingPassportItem] = useState<Item | null>(null);
 
   // Notifications State
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -40,7 +43,7 @@ export function App() {
     setToasts((prev) => [...prev, { id, type, title, message }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4500);
+    }, 4000);
   };
 
   const removeToast = (id: string) => {
@@ -65,6 +68,7 @@ export function App() {
           item.title.toLowerCase().includes(q) ||
           item.description.toLowerCase().includes(q) ||
           item.locationName.toLowerCase().includes(q) ||
+          item.passportId.toLowerCase().includes(q) ||
           item.tags.some((t) => t.toLowerCase().includes(q));
         if (!matchesQuery) return false;
       }
@@ -89,48 +93,146 @@ export function App() {
   }, [items, searchQuery, statusFilter, selectedCategory, selectedLocation]);
 
   // Handle New Item Submission
-  const handleCreateItem = (newItemData: Omit<Item, 'id' | 'status' | 'dateReported'>) => {
+  const handleCreateItem = (
+    newItemData: Omit<Item, 'id' | 'status' | 'dateReported' | 'passportId'>
+  ) => {
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const passportId = `CR-2026-${Math.floor(10000 + Math.random() * 90000)}`;
+
     const newItem: Item = {
       ...newItemData,
       id: `item-${Date.now()}`,
+      passportId,
       status: newItemData.type === 'lost' ? 'lost' : 'found',
-      dateReported: new Date().toISOString(),
+      dateReported: now.toISOString(),
+      timeline: [
+        {
+          id: `t-${Date.now()}-1`,
+          date: dateStr,
+          time: timeStr,
+          title: `Item registered as ${newItemData.type.toUpperCase()}`,
+          location: newItemData.locationName,
+          actor: newItemData.reporter.name,
+        },
+        {
+          id: `t-${Date.now()}-2`,
+          date: dateStr,
+          time: timeStr,
+          title: `Item Passport ${passportId} generated`,
+          location: 'Campus Registry',
+        },
+      ],
     };
 
     setItems((prev) => [newItem, ...prev]);
 
     addToast(
       'success',
-      'Item Report Published',
-      `"${newItem.title}" has been registered in the campus network. Auto-matching active!`
+      'Report Registered',
+      `"${newItem.title}" (${newItem.passportId}) is now listed in the campus registry.`
     );
   };
 
-  // Handle Claim Success
-  const handleSuccessClaim = (itemId: string, claimantInfo: { name: string; email: string }) => {
+  // Handle Claim Success & Safe Handoff
+  const handleSuccessClaim = (
+    itemId: string,
+    claimantInfo: { name: string; email: string },
+    handoffCode?: string,
+    handoffLocation?: string
+  ) => {
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
     setItems((prev) =>
-      prev.map((i) =>
-        i.id === itemId
-          ? {
-              ...i,
-              status: 'reunited',
-            }
-          : i
-      )
+      prev.map((i) => {
+        if (i.id !== itemId) return i;
+
+        const updatedTimeline = [
+          ...(i.timeline || []),
+          {
+            id: `t-claim-${Date.now()}`,
+            date: dateStr,
+            time: timeStr,
+            title: 'Ownership verified & Safe Handoff generated',
+            location: handoffLocation || 'Dr. APJ Abdul Kalam Central Library Help Desk',
+            actor: claimantInfo.name,
+            note: `One-time code: ${handoffCode || '739 214'}`,
+          },
+        ];
+
+        return {
+          ...i,
+          status: 'reunited',
+          safeHandoff: {
+            code: handoffCode || '739 214',
+            pickupLocation: handoffLocation || 'Dr. APJ Abdul Kalam Central Library Help Desk',
+            status: 'ready',
+          },
+          timeline: updatedTimeline,
+        };
+      })
     );
 
     addToast(
       'success',
-      'Item Reunited & Verified! 🎉',
-      `Ownership confirmed for ${claimantInfo.name}. Contact information decrypted.`
+      'Ownership Verified',
+      `One-time handoff code generated for ${claimantInfo.name}. Contact details remain private.`
     );
+  };
+
+  // Update Item Status (Staff / Admin Action)
+  const handleUpdateItemStatus = (
+    itemId: string,
+    newStatus: Item['status'],
+    trustStatus?: 'in_safe_custody' | 'staff_verified',
+    note?: string
+  ) => {
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-US', { day: '2-digit', month: 'short' });
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    setItems((prev) =>
+      prev.map((i) => {
+        if (i.id !== itemId) return i;
+
+        const updatedTimeline = [
+          ...(i.timeline || []),
+          {
+            id: `t-admin-${Date.now()}`,
+            date: dateStr,
+            time: timeStr,
+            title: trustStatus ? `Marked as ${trustStatus.replace('_', ' ')}` : `Status updated to ${newStatus}`,
+            actor: 'Campus Staff / Proctor',
+            note,
+          },
+        ];
+
+        return {
+          ...i,
+          status: newStatus,
+          trustBadge: trustStatus
+            ? {
+                status: trustStatus,
+                verifiedBy: 'Proctor Desk',
+                verifiedAt: dateStr,
+              }
+            : i.trustBadge,
+          timeline: updatedTimeline,
+        };
+      })
+    );
+
+    addToast('info', 'Status Updated', note || `Item record updated by campus staff.`);
   };
 
   // Reset sample dataset
   const handleResetData = () => {
-    if (window.confirm('Reset lost and found database to original campus demonstration data?')) {
+    if (window.confirm('Reset database to default campus lost and found records?')) {
       setItems(INITIAL_ITEMS);
-      addToast('info', 'Database Reset', 'Sample campus items and status restored.');
+      addToast('info', 'Database Reset', 'Sample university records restored.');
     }
   };
 
@@ -151,8 +253,25 @@ export function App() {
     setIsSmartMatchOpen(true);
   };
 
+  // IF USER IS ON SHORT MODERN LANDING PAGE
+  if (viewMode === 'landing') {
+    return (
+      <LandingPage
+        onExploreCampus={() => {
+          setViewMode('app');
+          setActiveTab('feed');
+        }}
+        onReportItem={() => {
+          setViewMode('app');
+          setIsReportModalOpen(true);
+        }}
+      />
+    );
+  }
+
+  // MAIN CAMPUS REUNITE APPLICATION
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#F7F8FA] text-slate-900 flex flex-col font-sans">
       {/* Global Header */}
       <Header
         activeTab={activeTab}
@@ -161,14 +280,15 @@ export function App() {
         matchesCount={matches.length}
         totalItemsCount={items.length}
         onResetData={handleResetData}
+        onReturnToLanding={() => setViewMode('landing')}
       />
 
-      {/* Main Container */}
+      {/* Main App Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* TAB 1: BROWSE FEED */}
+        {/* TAB 1: FEED */}
         {activeTab === 'feed' && (
-          <div className="space-y-6">
-            {/* Step 1 Analytics Cards */}
+          <div className="space-y-4">
+            {/* Step 1 Compact Stats */}
             <AnalyticsCards
               items={items}
               matches={matches}
@@ -179,7 +299,7 @@ export function App() {
               onFilterStatus={(status) => setStatusFilter(status)}
             />
 
-            {/* Step 2 Search & Multi-Filters */}
+            {/* Step 2 Search & Filters */}
             <SearchAndFilters
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
@@ -193,26 +313,21 @@ export function App() {
               totalFilteredCount={filteredItems.length}
             />
 
-            {/* Step 1 & 2 Main Grid Display */}
+            {/* Main Item Feed Grid */}
             <div>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-extrabold text-slate-900">Campus Activity Feed</h2>
-                  <span className="text-xs font-semibold text-slate-500 bg-slate-200/80 px-2 py-0.5 rounded-full">
-                    {filteredItems.length} items
-                  </span>
-                </div>
-
+              <div className="flex items-center justify-between mb-3 text-xs">
+                <span className="font-semibold text-slate-700">
+                  Campus Items ({filteredItems.length})
+                </span>
                 {matches.length > 0 && (
                   <button
                     onClick={() => {
                       setSelectedLostItemForMatch(null);
                       setIsSmartMatchOpen(true);
                     }}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-3 py-1.5 rounded-xl transition-all"
+                    className="text-indigo-600 hover:text-indigo-800 font-medium"
                   >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-                    <span>View {matches.length} Auto-Matches</span>
+                    View {matches.length} potential matches →
                   </button>
                 )}
               </div>
@@ -223,12 +338,13 @@ export function App() {
                 onSelectOnMap={handleSelectOnMap}
                 onOpenReportModal={() => setIsReportModalOpen(true)}
                 onOpenMatchesForItem={handleOpenMatchesForItem}
+                onViewPassport={(item) => setViewingPassportItem(item)}
               />
             </div>
           </div>
         )}
 
-        {/* TAB 2: INTERACTIVE CAMPUS MAP */}
+        {/* TAB 2: REAL INTERACTIVE CAMPUS MAP */}
         {activeTab === 'map' && (
           <CampusMap
             items={items}
@@ -236,50 +352,42 @@ export function App() {
             onSelectLocation={(locId) => setMapSelectedLocationId(locId)}
             onClaimItem={(item) => setClaimingItem(item)}
             onOpenReportModal={() => setIsReportModalOpen(true)}
+            onViewItemPassport={(item) => setViewingPassportItem(item)}
           />
         )}
 
-        {/* TAB 3: SMART AUTO-MATCHES VIEW */}
+        {/* TAB 3: SMART MATCHES VIEW */}
         {activeTab === 'matches' && (
-          <div className="space-y-6">
-            <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center">
-                  <Sparkles className="w-5 h-5 animate-pulse" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900">Automated Cross-Match Portal</h2>
-                  <p className="text-xs text-slate-500">
-                    Comparing reported lost items against custody catalog using fuzzy similarity and proximity
-                  </p>
-                </div>
+          <div className="space-y-4 max-w-4xl mx-auto">
+            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">Potential Matches</h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Matches are ranked using item details, location and report timing.
+                </p>
               </div>
-              <span className="px-3 py-1 rounded-full text-xs font-extrabold bg-amber-500 text-white shadow-xs">
-                {matches.length} Candidates Available
+              <span className="text-xs font-semibold px-2.5 py-1 rounded bg-slate-100 text-slate-800 border border-slate-200">
+                {matches.length} Candidates
               </span>
             </div>
 
-            {/* Smart Matches embedded list */}
-            <div className="bg-slate-100/60 p-6 rounded-3xl border border-slate-200/80">
-              <button
-                onClick={() => {
-                  setSelectedLostItemForMatch(null);
-                  setIsSmartMatchOpen(true);
-                }}
-                className="w-full py-4 text-center rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
-              >
-                <Sparkles className="w-4 h-4 text-amber-300" />
-                <span>Open Full Auto-Match Comparison Drawer</span>
-              </button>
-            </div>
+            <button
+              onClick={() => {
+                setSelectedLostItemForMatch(null);
+                setIsSmartMatchOpen(true);
+              }}
+              className="w-full py-3 text-center rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 font-semibold text-xs shadow-xs transition-colors"
+            >
+              Open Full Match Review Drawer ({matches.length})
+            </button>
           </div>
         )}
 
-        {/* TAB 4: GOOD SAMARITAN KARMA LEADERBOARD */}
+        {/* TAB 4: CAMPUS KARMA */}
         {activeTab === 'leaderboard' && <LeaderboardView />}
       </main>
 
-      {/* Floating Smart Match Drawer (accessible from everywhere) */}
+      {/* Smart Match Review Drawer */}
       <SmartMatchDrawer
         isOpen={isSmartMatchOpen || activeTab === 'matches'}
         onClose={() => {
@@ -295,19 +403,35 @@ export function App() {
         selectedLostItem={selectedLostItemForMatch}
       />
 
-      {/* Post Item Modal (Step 2) */}
+      {/* Report Item Modal */}
       <PostItemModal
         isOpen={isReportModalOpen}
         onClose={() => setIsReportModalOpen(false)}
         onSubmit={handleCreateItem}
       />
 
-      {/* Security Claim Modal (Step 3) */}
+      {/* Ownership Verification & Safe Handoff Modal */}
       <ClaimModal
         isOpen={!!claimingItem}
         onClose={() => setClaimingItem(null)}
         item={claimingItem}
         onSuccessClaim={handleSuccessClaim}
+      />
+
+      {/* Item Passport & Lifecycle Modal */}
+      <ItemPassportModal
+        isOpen={!!viewingPassportItem}
+        onClose={() => setViewingPassportItem(null)}
+        item={viewingPassportItem}
+        onClaim={(item) => {
+          setViewingPassportItem(null);
+          setClaimingItem(item);
+        }}
+        onSelectOnMap={(locId) => {
+          setViewingPassportItem(null);
+          handleSelectOnMap(locId);
+        }}
+        onUpdateStatus={handleUpdateItemStatus}
       />
 
       {/* Toast Notification Container */}

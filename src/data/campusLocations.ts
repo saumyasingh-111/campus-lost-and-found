@@ -1,5 +1,11 @@
 import { CampusLocation } from '../types';
 
+export const CAMPUS_CENTER = {
+  lat: 28.5450,
+  lng: 77.1925,
+  zoom: 16,
+};
+
 export const CAMPUS_LOCATIONS: CampusLocation[] = [
   {
     id: 'loc-library',
@@ -7,7 +13,7 @@ export const CAMPUS_LOCATIONS: CampusLocation[] = [
     code: 'LIB',
     description: '3-floor digital library, quiet reading rooms, 2nd floor e-resource lab',
     category: 'Academic',
-    coordinates: { x: 50, y: 35 },
+    coordinates: { lat: 28.5453, lng: 77.1928, x: 50, y: 35 },
     safeZone: true,
   },
   {
@@ -16,7 +22,7 @@ export const CAMPUS_LOCATIONS: CampusLocation[] = [
     code: 'SAC',
     description: 'Student council room, club rooms, music room, and campus stationery shop',
     category: 'Student Life',
-    coordinates: { x: 32, y: 55 },
+    coordinates: { lat: 28.5440, lng: 77.1895, x: 32, y: 55 },
     safeZone: true,
   },
   {
@@ -25,7 +31,7 @@ export const CAMPUS_LOCATIONS: CampusLocation[] = [
     code: 'CSE',
     description: 'Computing labs, Turing auditorium, and robotics innovation center',
     category: 'Academic',
-    coordinates: { x: 72, y: 28 },
+    coordinates: { lat: 28.5458, lng: 77.1912, x: 72, y: 28 },
     safeZone: false,
   },
   {
@@ -34,7 +40,7 @@ export const CAMPUS_LOCATIONS: CampusLocation[] = [
     code: 'GYM',
     description: 'Indoor badminton courts, gymnasium, table tennis hall, and cricket pavilion',
     category: 'Athletics',
-    coordinates: { x: 22, y: 30 },
+    coordinates: { lat: 28.5432, lng: 77.1908, x: 22, y: 30 },
     safeZone: true,
   },
   {
@@ -43,7 +49,7 @@ export const CAMPUS_LOCATIONS: CampusLocation[] = [
     code: 'MESS',
     description: 'Multi-vendor food court, Amul parlour, Nescafe counter, and dining hall',
     category: 'Student Life',
-    coordinates: { x: 68, y: 65 },
+    coordinates: { lat: 28.5448, lng: 77.1942, x: 68, y: 65 },
     safeZone: false,
   },
   {
@@ -52,7 +58,7 @@ export const CAMPUS_LOCATIONS: CampusLocation[] = [
     code: 'LMC',
     description: 'Open green lawns, open-air theatre (OAT), and fountain seating',
     category: 'Student Life',
-    coordinates: { x: 48, y: 68 },
+    coordinates: { lat: 28.5445, lng: 77.1922, x: 48, y: 68 },
     safeZone: false,
   },
   {
@@ -61,7 +67,7 @@ export const CAMPUS_LOCATIONS: CampusLocation[] = [
     code: 'LHC',
     description: 'Multi-tiered lecture halls LH1 to LH12, seminar rooms, and tutorial blocks',
     category: 'Academic',
-    coordinates: { x: 80, y: 50 },
+    coordinates: { lat: 28.5465, lng: 77.1935, x: 80, y: 50 },
     safeZone: false,
   },
   {
@@ -70,7 +76,7 @@ export const CAMPUS_LOCATIONS: CampusLocation[] = [
     code: 'HSTL',
     description: 'Senior student hostel blocks, common TV room, cycle stand, and laundry area',
     category: 'Residence',
-    coordinates: { x: 25, y: 78 },
+    coordinates: { lat: 28.5475, lng: 77.1882, x: 25, y: 78 },
     safeZone: false,
   },
   {
@@ -79,7 +85,7 @@ export const CAMPUS_LOCATIONS: CampusLocation[] = [
     code: 'PROCTOR',
     description: '24/7 Chief Proctor security dispatch, official lost item locker, CCTV command',
     category: 'Services',
-    coordinates: { x: 42, y: 18 },
+    coordinates: { lat: 28.5422, lng: 77.1948, x: 42, y: 18 },
     safeZone: true,
   },
 ];
